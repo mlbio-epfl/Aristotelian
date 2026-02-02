@@ -8,9 +8,9 @@
 
 ## The Aristotelian Representation Hypothesis
 
-> Neural networks, trained with different objectives on different data and modalities, are converging to **shared local neighborhood relationships**.
+> Neural networks, trained with different objectives on different data and modalities, are converging to shared local neighborhood relationships.
 
-We show that existing representation similarity metrics are confounded by network scale: increasing model depth or width systematically inflates similarity scores. After applying our null-calibration framework, the apparent global convergence reported by spectral measures (CKA, CCA) largely disappears, while local neighborhood similarity (mutual k-NN) retains significant alignment across modalities.
+![The Aristotelian Representation Hypothesis](https://brbiclab.epfl.ch/wp-content/uploads/2026/01/null-cali-v8.png)
 
 ---
 
