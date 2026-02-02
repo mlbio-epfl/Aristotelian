@@ -1,0 +1,63 @@
+# PRH (Platonic Representation Hypothesis) style for ICML papers
+# Adapted from the PRH paper aesthetic for narrow column format
+
+# Figure & axes
+figure.facecolor: white
+figure.dpi: 150
+axes.facecolor: "#F8F9FA"
+axes.edgecolor: "#C8CDD4"
+axes.linewidth: 1.2
+axes.grid: True
+axes.axisbelow: True
+
+# Grid (major only)
+grid.color: "#ECEDEC"
+grid.linewidth: 0.8
+grid.alpha: 1.0
+
+# Fonts
+font.family: sans-serif
+font.sans-serif: Helvetica, Arial, DejaVu Sans
+font.size: 9
+
+# Labels & ticks
+axes.labelcolor: "#324766"
+axes.titlecolor: "#324766"
+axes.labelsize: 10
+axes.titlesize: 11
+axes.titleweight: normal
+axes.labelpad: 3
+axes.titlepad: 8
+xtick.color: "#3B4F6D"
+ytick.color: "#3B4F6D"
+xtick.labelsize: 8
+ytick.labelsize: 8
+xtick.direction: out
+ytick.direction: out
+xtick.major.size: 4
+ytick.major.size: 4
+xtick.major.width: 1.0
+ytick.major.width: 1.0
+
+# Lines & markers
+lines.linewidth: 2.0
+lines.markersize: 6.0
+lines.markeredgewidth: 0.5
+
+# Legend
+legend.frameon: True
+legend.framealpha: 1.0
+legend.facecolor: white
+legend.edgecolor: "#C8CDD4"
+legend.fontsize: 8
+legend.shadow: True
+legend.columnspacing: 1.0
+legend.labelspacing: 0.3
+
+# Export
+savefig.facecolor: white
+savefig.bbox: tight
+savefig.pad_inches: 0.02
+savefig.dpi: 300
+pdf.fonttype: 42
+ps.fonttype: 42

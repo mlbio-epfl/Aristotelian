@@ -1,0 +1,6 @@
+[flake8]
+extend-ignore = D10, E203, E501, W503, W391, D202, D400, D205, D401, E402
+exclude:
+    .git/*,
+    docs/*,
+    external_code/*,
