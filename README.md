@@ -40,25 +40,13 @@ The Platonic Representation Hypothesis suggests that representations from neural
 
 ---
 
-## Installation
-
-### Using the calibration package only
+## Using the calibration package only
 
 ```bash
 pip install calibrated-similarity
 ```
 
 See the [package documentation](README_PYPI.md) for usage examples.
-
-### Reproducing paper experiments
-
-```bash
-git clone https://github.com/mlbio-epfl/Aristotelian.git
-cd calibrated-similarity
-
-pip install -e ".[dev]"
-pip install torch  # or with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu118
-```
 
 ---
 
