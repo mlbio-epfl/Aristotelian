@@ -53,10 +53,10 @@ video = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/fabiangroeger/calibrated-similarity"
-Documentation = "https://github.com/fabiangroeger/calibrated-similarity#readme"
-Repository = "https://github.com/fabiangroeger/calibrated-similarity"
-Issues = "https://github.com/fabiangroeger/calibrated-similarity/issues"
+Homepage = "https://github.com/mlbio-epfl/Aristotelian"
+Documentation = "https://github.com/mlbio-epfl/Aristotelian#readme"
+Repository = "https://github.com/mlbio-epfl/Aristotelian"
+Issues = "https://github.com/mlbio-epfl/Aristotelian/issues"
 
 [tool.hatch.build.targets.sdist]
 include = [
