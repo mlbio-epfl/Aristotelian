@@ -18,16 +18,6 @@ We show that existing representation similarity metrics are confounded by networ
 
 The Platonic Representation Hypothesis suggests that representations from neural networks are converging to a common statistical model of reality. We show that the existing metrics used to measure representational similarity are **confounded by network scale**: increasing model depth or width can systematically inflate representational similarity scores. To correct these effects, we introduce a **permutation-based null-calibration framework** that transforms any representational similarity metric into a calibrated score with statistical guarantees. We revisit the Platonic Representation Hypothesis with our calibration framework, which reveals a nuanced picture: the apparent convergence reported by global spectral measures largely disappears after calibration, while local neighborhood similarity retains significant agreement across different modalities.
 
-## Key Contributions
-
-1. **Width Confounder**: We identify that similarity metrics have dimension-dependent null baselines. A score of 0.3 may be significant for one comparison but within random chance for another.
-
-2. **Depth Confounder**: Searching for the best-matching layer pair across models inflates similarity scores, even under the null hypothesis.
-
-3. **Null-Calibration Framework**: We introduce permutation-based calibration algorithms that transform raw similarity scores into statistically meaningful measures that are **zero under the null hypothesis**.
-
-4. **Aristotelian Representation Hypothesis**: We propose that representations converge toward shared *local neighborhood relationships*, not a universal "platonic" ideal.
-
 ---
 
 ## Repository Structure
