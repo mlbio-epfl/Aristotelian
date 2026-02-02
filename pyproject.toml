@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "calibrated-similarity"
-version = "0.1.0"
+version = "0.1.1"
 description = "Null-calibrated similarity metrics via permutation testing"
 readme = "README_PYPI.md"
 license = "MIT"

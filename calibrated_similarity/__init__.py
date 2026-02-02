@@ -27,7 +27,7 @@ Example usage:
     )
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .calibration import calibrate, calibrate_layers
 
