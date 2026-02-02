@@ -10,7 +10,7 @@
 
 > Neural networks, trained with different objectives on different data and modalities, are converging to shared local neighborhood relationships.
 
-![The Aristotelian Representation Hypothesis](https://brbiclab.epfl.ch/wp-content/uploads/2026/01/null-cali-v8.png)
+![The Aristotelian Representation Hypothesis](https://brbiclab.epfl.ch/wp-content/uploads/2026/02/Screenshot-2026-02-02-at-08.38.20.png)
 
 ---
 
