@@ -1,0 +1,98 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "calibrated-similarity"
+version = "0.1.1"
+description = "Null-calibrated similarity metrics via permutation testing"
+readme = "README_PYPI.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Fabian Gröger", email = "fabian.groeger@unibas.ch" },
+]
+keywords = [
+    "representation-similarity",
+    "null-calibration",
+    "permutation-testing",
+    "cka",
+    "neural-networks",
+    "deep-learning",
+    "statistics",
+]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
+dependencies = [
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+# Keep video deps for the research code
+video = [
+    "decord>=0.6.0",
+    "opencv-python>=4.5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mlbio-epfl/Aristotelian"
+Documentation = "https://github.com/mlbio-epfl/Aristotelian#readme"
+Repository = "https://github.com/mlbio-epfl/Aristotelian"
+Issues = "https://github.com/mlbio-epfl/Aristotelian/issues"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/calibrated_similarity",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["calibrated_similarity"]
+
+# ============================================================================
+# Development tools configuration (for research code)
+# ============================================================================
+
+[tool.black]
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+skip_gitignore = true
+py_version = 39
+default_section = "THIRDPARTY"
+known_thirdparty = ["wandb"]
+
+[tool.pytest.ini_options]
+log_cli = false
+log_cli_level = "INFO"
+log_cli_format = "%(time)s :: %(name)s :: %(message)s"
+addopts = "-m 'not integration' --cov=aristotelian --cov=calibrated_similarity --cov-report=term-missing --cov-report=xml:coverage.xml"
+norecursedirs = ["external_code"]
+markers = [
+    "integration: integration tests (run with RUN_INTEGRATION=1)",
+]
+
+[tool.coverage.run]
+source = ["aristotelian", "calibrated_similarity"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
