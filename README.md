@@ -1,5 +1,6 @@
 # Revisiting the Platonic Representation Hypothesis: An Aristotelian View
 
+[![Paper](https://img.shields.io/badge/arXiv-2506.16895-b31b1b.svg)](https://arxiv.org/abs/2602.14486)
 [![Project Page](https://img.shields.io/badge/Project-Page-blue)](https://brbiclab.epfl.ch/projects/aristotelian/)
 
 **[Fabian Gröger*](https://fabiangroeger96.github.io/)** · **[Shuo Wen*](https://wenshuo128.github.io/)** · **[Maria Brbić](https://brbiclab.epfl.ch/team/)**
