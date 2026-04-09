@@ -66,17 +66,27 @@ class Procrustes(BaseMetric):
 
         from .utils import perm_batch_size
 
-        d = Xc.shape[1]
-        chunk = perm_batch_size(num_perms, d, Xc.dtype)
+        d_x = Xc.shape[1]
+        d_y = Yc.shape[1]
+        d_eig = min(d_x, d_y)
+        chunk = perm_batch_size(num_perms, d_eig, Xc.dtype)
         null_scores: list[float] = []
         for start in range(0, num_perms, chunk):
             end = min(start + chunk, num_perms)
-            Yc_perm = Yc[perms[start:end]]  # (B, n, d)
-            # M_batch[b] = Xc.T @ Yc_perm[b]  →  (B, d, d)
+            Yc_perm = Yc[perms[start:end]]  # (B, n, d_y)
+            # M_batch[b] = Xc.T @ Yc_perm[b]  →  (B, d_x, d_y)
             M_batch = torch.einsum("dn,bnk->bdk", XcT, Yc_perm)
-            MMt = M_batch @ M_batch.transpose(-1, -2)  # (B, d, d)
-            eigvals = torch.linalg.eigvalsh(MMt)  # (B, d)
-            sum_svals = torch.sqrt(torch.clamp(eigvals, min=0.0)).sum(dim=-1)  # (B,)
+            # Use the smaller Gram matrix for eigvalsh: O(min(d_x,d_y)^3)
+            if d_x <= d_y:
+                G = M_batch @ M_batch.transpose(-1, -2)  # (B, d_x, d_x)
+            else:
+                G = M_batch.transpose(-1, -2) @ M_batch  # (B, d_y, d_y)
+            try:
+                eigvals = torch.linalg.eigvalsh(G)  # (B, d_eig)
+                sum_svals = torch.sqrt(torch.clamp(eigvals, min=0.0)).sum(dim=-1)  # (B,)
+            except torch._C._LinAlgError:
+                svals = torch.linalg.svdvals(M_batch)
+                sum_svals = svals.sum(dim=-1)
             residual_sq = norm_Xc_sq + norm_Yc_sq - 2.0 * sum_svals
             residual = torch.sqrt(torch.clamp(residual_sq, min=0.0))
             scores = 1.0 - residual / (norm_Yc + EPS)
@@ -87,9 +97,18 @@ class Procrustes(BaseMetric):
 
 def _procrustes_from_centered(Xc: torch.Tensor, Yc: torch.Tensor) -> float:
     """Procrustes score from centered tensors, using eigvalsh for robustness."""
-    M = Xc.T @ Yc
-    eigvals = torch.linalg.eigvalsh(M @ M.T)
-    sum_svals = torch.sqrt(torch.clamp(eigvals, min=0.0)).sum()
+    M = Xc.T @ Yc  # (d_x, d_y)
+    # Use the smaller Gram matrix: M@M.T is (d_x,d_x), M.T@M is (d_y,d_y).
+    # Both share the same non-zero eigenvalues (squared singular values of M).
+    if M.shape[0] <= M.shape[1]:
+        G = M @ M.T
+    else:
+        G = M.T @ M
+    try:
+        eigvals = torch.linalg.eigvalsh(G)
+        sum_svals = torch.sqrt(torch.clamp(eigvals, min=0.0)).sum()
+    except torch._C._LinAlgError:
+        sum_svals = torch.linalg.svdvals(M).sum()
     norm_Xc_sq = torch.sum(Xc**2)
     norm_Yc = torch.norm(Yc, p="fro")
     residual_sq = norm_Xc_sq + norm_Yc**2 - 2.0 * sum_svals

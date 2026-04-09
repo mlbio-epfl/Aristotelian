@@ -178,11 +178,9 @@ def gated_cca(
     num_permutations: int,
     device: str,
     perms: torch.Tensor | None = None,
-    proj_dim: int = 32,
 ) -> MetricResult:
     """Significance-gated CCA mean."""
     config = MetricConfig(
-        cca_dim=proj_dim,
         calibrate=True,
         num_permutations=num_permutations,
         quantile=q,
@@ -222,11 +220,9 @@ def gated_pwcca(
     num_permutations: int,
     device: str,
     perms: torch.Tensor | None = None,
-    proj_dim: int = 32,
 ) -> MetricResult:
     """Significance-gated PWCCA."""
     config = MetricConfig(
-        cca_dim=proj_dim,
         calibrate=True,
         num_permutations=num_permutations,
         quantile=q,
@@ -306,6 +302,7 @@ def _multiq_compute(
         perms=perms,
         **kwargs,
     )
+    metric = MetricRegistry.get(metric_name)
     result = MetricRegistry.compute(metric_name, X, Y, config)
 
     # Now compute for each quantile using the same null samples
@@ -315,6 +312,7 @@ def _multiq_compute(
     from .calibration import compute_null_variants
 
     null_arr = np.asarray(result.null_samples, dtype=float)
+    full_arr = np.append(null_arr, result.raw)
     raw = result.raw
     p_value = result.pvalue
 
@@ -322,9 +320,9 @@ def _multiq_compute(
     tau = {}
     tail_strength = {}
     for q in quantiles:
-        tau_q = float(np.quantile(null_arr, q))
+        tau_q = float(np.quantile(full_arr, q))
         alpha = 1.0 - float(q)
-        g_val = gated_rescaled(raw, tau_alpha=tau_q, s_max=1.0)
+        g_val = gated_rescaled(raw, tau_alpha=tau_q, s_max=metric.max_score)
         if p_value > alpha:
             g_val = 0.0
         gated[q] = g_val
@@ -335,7 +333,7 @@ def _multiq_compute(
             tail_strength[q] = float(max(0.0, min(1.0, (alpha - p_value) / alpha)))
 
     variants = compute_null_variants(
-        raw, result.null_samples, min_score=0.0, max_score=1.0
+        raw, result.null_samples, min_score=metric.min_score, max_score=metric.max_score
     )
     return {
         "raw": raw,
@@ -443,7 +441,6 @@ def sg_cca_multiq(
     num_permutations: int,
     device: str,
     perms: torch.Tensor | None = None,
-    proj_dim: int = 32,
 ) -> dict[str, float | dict[float, float]]:
     """CCA with multiple quantiles."""
     return _multiq_compute(
@@ -454,7 +451,6 @@ def sg_cca_multiq(
         num_permutations=num_permutations,
         device=device,
         perms=perms,
-        cca_dim=proj_dim,
     )
 
 
@@ -489,7 +485,6 @@ def sg_pwcca_multiq(
     num_permutations: int,
     device: str,
     perms: torch.Tensor | None = None,
-    proj_dim: int = 32,
 ) -> dict[str, float | dict[float, float]]:
     """PWCCA with multiple quantiles."""
     return _multiq_compute(
@@ -500,7 +495,6 @@ def sg_pwcca_multiq(
         num_permutations=num_permutations,
         device=device,
         perms=perms,
-        cca_dim=proj_dim,
     )
 
 
@@ -620,6 +614,7 @@ def prh_metric_spec(metric: str, *, topk: int) -> tuple[Callable, float]:
         "procrustes": ("procrustes", 1.0),
         "cca": ("cca", 1.0),
         "rv_coefficient": ("rv_coefficient", 1.0),
+        "rsa": ("rsa", 1.0),
     }
 
     if metric not in metric_map:

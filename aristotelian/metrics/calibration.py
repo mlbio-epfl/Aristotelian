@@ -85,8 +85,8 @@ def compute_calibration_stats(
 ) -> CalibrationStats:
     """Compute calibration statistics from raw score and null samples.
 
-    This is the shared implementation used by both torch-based metrics
-    (via MetricResult) and numpy-based metrics (via _sg_metric).
+    This is the shared implementation used by torch-based metrics
+    (via MetricResult).
 
     Args:
         raw: The observed raw metric value.

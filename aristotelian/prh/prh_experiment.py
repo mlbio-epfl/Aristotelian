@@ -24,7 +24,6 @@ from ..experiments.multiple import bh_fdr
 from ..utils.logging import ExperimentState, log_timing
 from .alignment import (
     compute_alignment_gated,
-    compute_alignment_gated_cached,
     compute_alignment_gated_cka_cached,
     compute_alignment_gated_cknna_cached,
     compute_alignment_gated_cycle_knn_cached,
@@ -124,33 +123,6 @@ def _extract_vision_features(
         transform=transform,
     )
     return _stack_layers(layers), num_params
-
-
-def _prh_compute_pair_cached(
-    config: Tuple[
-        int,
-        int,  # i, j indices
-        List,
-        List,  # x_layers, y_layers
-        List,
-        List,  # x_masks, y_masks
-        int,
-        int,
-        float,  # topk, num_permutations, alpha
-    ],
-) -> Tuple[int, int, Dict[str, object]]:
-    """Compute alignment for a single pair with cached masks (for ProcessPoolExecutor)."""
-    i, j, x_layers, y_layers, x_masks, y_masks, topk, num_permutations, alpha = config
-    res = compute_alignment_gated_cached(
-        x_layers,
-        y_layers,
-        x_masks,
-        y_masks,
-        topk=topk,
-        num_permutations=num_permutations,
-        alpha=alpha,
-    )
-    return i, j, res
 
 
 def _prh_compute_pair_generic(
@@ -356,7 +328,6 @@ def run_prh_experiment(
     num_permutations: int = 200,
     alpha: float = 0.05,
     q_outlier: float = 1.0,
-    force: bool = False,
     force_features: bool = False,
     num_workers: int = 1,
 ) -> Dict[str, np.ndarray]:

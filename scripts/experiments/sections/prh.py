@@ -123,7 +123,6 @@ def run_prh_alignment(
                     num_permutations=500,
                     alpha=0.05,
                     q_outlier=prh_q_outlier,
-                    force=force,
                     force_features=force_features,
                     num_workers=num_workers,
                 )
@@ -218,7 +217,6 @@ def run_v2t_alignment(
                     num_permutations=500,
                     alpha=0.05,
                     q_outlier=v2t_q_outlier,
-                    force=force,
                     force_features=force_features,
                     num_workers=num_workers,
                 )

@@ -136,9 +136,29 @@ class CCAMean(BaseMetric):
     def _compute_raw(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
     ) -> float:
-        X_np = X.detach().cpu().numpy()
-        Y_np = Y.detach().cpu().numpy()
-        return _cca_mean(X_np, Y_np)
+        device = config.device
+        reg = 1e-6
+        Xc = (X - X.mean(0, keepdim=True)).to(device=device, dtype=torch.float32)
+        Yc = (Y - Y.mean(0, keepdim=True)).to(device=device, dtype=torch.float32)
+        n, dx, dy = Xc.shape[0], Xc.shape[1], Yc.shape[1]
+        eye_x = torch.eye(dx, device=device, dtype=torch.float32)
+        eye_y = torch.eye(dy, device=device, dtype=torch.float32)
+        Cxx = (Xc.T @ Xc) / (n - 1) + reg * eye_x
+        Cyy = (Yc.T @ Yc) / (n - 1) + reg * eye_y
+        Cxy = (Xc.T @ Yc) / (n - 1)
+        Sx, Ux = torch.linalg.eigh(Cxx)
+        Sy, Uy = torch.linalg.eigh(Cyy)
+        Sx = torch.clamp(Sx, min=reg)
+        Sy = torch.clamp(Sy, min=reg)
+        Cxx_inv_sqrt = Ux @ torch.diag(1.0 / torch.sqrt(Sx)) @ Ux.T
+        Cyy_inv_sqrt = Uy @ torch.diag(1.0 / torch.sqrt(Sy)) @ Uy.T
+        T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
+        try:
+            eigvals = torch.linalg.eigvalsh(T @ T.T)
+            svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
+        except torch._C._LinAlgError:
+            svals = torch.linalg.svdvals(T)
+        return float(svals.mean().item())
 
     def _compute_null_distribution(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
@@ -196,8 +216,11 @@ class CCAMean(BaseMetric):
             # T_batch[b] = L @ R_perm[b] / (n-1)
             T_batch = torch.einsum("xn,bny->bxy", L, R_perm) / (n - 1)
             TTt = T_batch @ T_batch.transpose(-1, -2)  # (B, dx, dx)
-            eigvals = torch.linalg.eigvalsh(TTt)  # (B, dx)
-            svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
+            try:
+                eigvals = torch.linalg.eigvalsh(TTt)  # (B, dx)
+                svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
+            except torch._C._LinAlgError:
+                svals = torch.linalg.svdvals(T_batch)
             null_scores.extend(svals.mean(dim=-1).cpu().tolist())
 
         return null_scores
@@ -303,8 +326,11 @@ class SVCCA(BaseMetric):
             R_perm = R[perms[start:end]]  # (B, n, cca_dim)
             T_batch = torch.einsum("xn,bny->bxy", L, R_perm) / (n - 1)
             TTt = T_batch @ T_batch.transpose(-1, -2)  # (B, cca_dim, cca_dim)
-            eigvals = torch.linalg.eigvalsh(TTt)
-            svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
+            try:
+                eigvals = torch.linalg.eigvalsh(TTt)
+                svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
+            except torch._C._LinAlgError:
+                svals = torch.linalg.svdvals(T_batch)
             null_scores.extend(svals.mean(dim=-1).cpu().tolist())
 
         return null_scores
@@ -328,9 +354,31 @@ class PWCCA(BaseMetric):
     def _compute_raw(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
     ) -> float:
-        X_np = X.detach().cpu().numpy()
-        Y_np = Y.detach().cpu().numpy()
-        return _pwcca_mean(X_np, Y_np)
+        device = config.device
+        reg = 1e-6
+        Xc = (X - X.mean(0, keepdim=True)).to(device=device, dtype=torch.float32)
+        Yc = (Y - Y.mean(0, keepdim=True)).to(device=device, dtype=torch.float32)
+        n, dx, dy = Xc.shape[0], Xc.shape[1], Yc.shape[1]
+        eye_x = torch.eye(dx, device=device, dtype=torch.float32)
+        eye_y = torch.eye(dy, device=device, dtype=torch.float32)
+        Cxx = (Xc.T @ Xc) / (n - 1) + reg * eye_x
+        Cyy = (Yc.T @ Yc) / (n - 1) + reg * eye_y
+        Cxy = (Xc.T @ Yc) / (n - 1)
+        Sx, Ux = torch.linalg.eigh(Cxx)
+        Sy, Uy = torch.linalg.eigh(Cyy)
+        Sx = torch.clamp(Sx, min=reg)
+        Sy = torch.clamp(Sy, min=reg)
+        Cxx_inv_sqrt = Ux @ torch.diag(1.0 / torch.sqrt(Sx)) @ Ux.T
+        Cyy_inv_sqrt = Uy @ torch.diag(1.0 / torch.sqrt(Sy)) @ Uy.T
+        T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
+        eigvals, U = torch.linalg.eigh(T @ T.T)
+        # eigh ascending → reverse for SVD descending convention
+        svals = torch.sqrt(torch.clamp(eigvals.flip(-1), min=0.0))
+        U = U.flip(-1)
+        A = Cxx_inv_sqrt @ U
+        weights = A.abs().sum(dim=0)
+        weights = weights / (weights.sum() + 1e-8)
+        return float((weights * svals).sum().item())
 
     def _compute_null_distribution(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
@@ -414,7 +462,7 @@ class RVCoefficient(BaseMetric):
         Gx = Xc @ Xc.T
         Gy = Yc @ Yc.T
         num = torch.sum(Gx * Gy)  # = trace(Gx @ Gy)
-        denom = torch.sqrt(torch.trace(Gx**2) * torch.trace(Gy**2)) + EPS
+        denom = torch.sqrt((Gx * Gx).sum() * (Gy * Gy).sum()) + EPS
         return float((num / denom).item())
 
     def _compute_null_distribution(
@@ -443,8 +491,8 @@ class RVCoefficient(BaseMetric):
         Yc = Y - Y.mean(dim=0, keepdim=True)
         Gx = Xc @ Xc.T  # (n, n) — constant
         Gy = Yc @ Yc.T  # (n, n) — constant
-        # Denominator is invariant: permuting rows/cols of Gy preserves diagonal values
-        denom = torch.sqrt(torch.trace(Gx**2) * torch.trace(Gy**2)) + EPS
+        # Denominator is invariant: Frobenius norm is preserved under row/col permutation
+        denom = torch.sqrt((Gx * Gx).sum() * (Gy * Gy).sum()) + EPS
 
         # Batched: permute rows+cols of Gy in chunks
         max_chunk = max(1, (512 * 1024 * 1024) // (n * n * Gx.element_size()))
@@ -465,16 +513,6 @@ class RVCoefficient(BaseMetric):
 # =============================================================================
 # Numpy-first helpers and gated variants (used by tests/experiments)
 # =============================================================================
-
-
-def cca_project_pca(
-    X: np.ndarray,
-    Y: np.ndarray,
-    *,
-    proj_dim: int | None = None,
-    var_threshold: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    return _cca_project_pca(X, Y, proj_dim=proj_dim, var_threshold=var_threshold)
 
 
 def cca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
@@ -525,8 +563,10 @@ def pwcca_mean_approx(
 def rv_coefficient(X: np.ndarray, Y: np.ndarray) -> float:
     Xc = center_np(X)
     Yc = center_np(Y)
-    num = np.trace(Xc @ Xc.T @ Yc @ Yc.T)
-    denom = np.sqrt(np.trace((Xc @ Xc.T) ** 2) * np.trace((Yc @ Yc.T) ** 2)) + EPS
+    Gx = Xc @ Xc.T
+    Gy = Yc @ Yc.T
+    num = np.trace(Gx @ Gy)
+    denom = np.sqrt(np.sum(Gx * Gx) * np.sum(Gy * Gy)) + EPS
     return float(num / denom)
 
 

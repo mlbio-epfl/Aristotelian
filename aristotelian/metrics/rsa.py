@@ -240,6 +240,15 @@ class RSA(BaseMetric):
                 vx = cache["vx_sampled"].to(device)
             else:
                 vx = torch.norm(X[idx0] - X[idx1], dim=1)
+
+            # Precompute full distance matrix for efficient permutation indexing
+            # (avoids materializing huge (batch, pairs, d) tensors per batch)
+            if "dist_Y" in cache:
+                dist_y = cache["dist_Y"].to(device)
+            else:
+                dist_y = torch.cdist(Y, Y, p=2)
+                cache["dist_Y"] = dist_y
+
             rx = _rankdata_torch(vx)
             rx_c = rx - rx.mean()
             rx_norm = torch.norm(rx_c) + EPS
@@ -247,9 +256,7 @@ class RSA(BaseMetric):
 
             for start in range(0, num_perms, batch_size):
                 batch = perms[start : start + batch_size]
-                y0 = Y[batch[:, idx0]]
-                y1 = Y[batch[:, idx1]]
-                vy_perm = torch.norm(y0 - y1, dim=2)
+                vy_perm = dist_y[batch[:, idx0], batch[:, idx1]]
                 ry = _rankdata_torch_batch(vy_perm)
                 ry_c = ry - ry.mean(dim=1, keepdim=True)
                 denom = (ry_c.norm(dim=1) * rx_norm) + EPS

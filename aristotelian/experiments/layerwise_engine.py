@@ -125,34 +125,6 @@ def _cka_from_grams(K: torch.Tensor, L: torch.Tensor, unbiased: bool = False) ->
     return float(cka_val.item())
 
 
-def _cknna_from_grams(
-    K: torch.Tensor,
-    L: torch.Tensor,
-    topk: int,
-    unbiased: bool = True,
-) -> float:
-    n = K.shape[0]
-
-    def similarity(Km: torch.Tensor, Lm: torch.Tensor) -> torch.Tensor:
-        if unbiased:
-            K_hat = Km.clone().fill_diagonal_(float("-inf"))
-            L_hat = Lm.clone().fill_diagonal_(float("-inf"))
-        else:
-            K_hat, L_hat = Km, Lm
-        _, topk_K_indices = torch.topk(K_hat, topk, dim=1)
-        _, topk_L_indices = torch.topk(L_hat, topk, dim=1)
-        mask_K = torch.zeros(n, n, device=Km.device).scatter_(1, topk_K_indices, 1)
-        mask_L = torch.zeros(n, n, device=Km.device).scatter_(1, topk_L_indices, 1)
-        mask = mask_K * mask_L
-        hsic_fn = hsic_unbiased if unbiased else hsic_biased
-        return hsic_fn(mask * Km, mask * Lm)
-
-    sim_kl = similarity(K, L)
-    sim_kk = similarity(K, K)
-    sim_ll = similarity(L, L)
-    return float(sim_kl.item() / (torch.sqrt(sim_kk * sim_ll) + 1e-6).item())
-
-
 def _cknna_mask_from_gram(
     K: torch.Tensor, topk: int, *, unbiased: bool = True
 ) -> torch.Tensor:
@@ -801,23 +773,6 @@ def _center_gram_batched(K: torch.Tensor) -> torch.Tensor:
     return K - row_mean - col_mean + grand_mean
 
 
-def _cka_from_grams_batched(K: torch.Tensor, L: torch.Tensor) -> torch.Tensor:
-    """Compute CKA from batched centered Gram matrices.
-
-    Args:
-        K: Centered Gram matrices, shape (..., n, n).
-        L: Centered Gram matrices, shape (..., n, n).
-
-    Returns:
-        CKA values, shape (...).
-    """
-    # HSIC = sum(Kc * Lc)
-    hsic_kl = (K * L).sum(dim=(-2, -1))
-    hsic_kk = (K * K).sum(dim=(-2, -1))
-    hsic_ll = (L * L).sum(dim=(-2, -1))
-    return hsic_kl / (torch.sqrt(hsic_kk * hsic_ll) + 1e-8)
-
-
 def similarity_matrix_cka_batched(
     repsA: torch.Tensor,
     repsB: torch.Tensor,
@@ -876,7 +831,6 @@ def permutation_null_batched(
     num_permutations: int,
     *,
     seed: int | None = None,
-    perm_chunk_size: int = 50,
     show_progress: bool = False,
 ) -> torch.Tensor:
     """Compute permutation null distributions for batched trials.
@@ -886,7 +840,6 @@ def permutation_null_batched(
         repsB: Shape (T, L_b, n, d).
         num_permutations: Number of permutations.
         seed: Random seed.
-        perm_chunk_size: Process permutations in chunks to save memory.
         show_progress: Whether to show tqdm progress bar.
 
     Returns:

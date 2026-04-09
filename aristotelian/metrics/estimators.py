@@ -86,20 +86,15 @@ def _compute_moment_terms(
     return results
 
 
-def cka_estimators_all(
-    X: torch.Tensor, Y: torch.Tensor, indep_cols: bool = True
-) -> tuple[float, float, float]:
-    """Compute all three CKA estimators: naive, debiased (Song), and dependent-cols."""
-    if X.shape[0] != Y.shape[0]:
-        raise ValueError("X and Y must have the same number of samples")
-    P = X.shape[0]
-    Qa = X.shape[1]
-    Qb = Y.shape[1]
-    nf_a = (P**0.5) * (Qa**0.5)
-    nf_b = (P**0.5) * (Qb**0.5)
-    A = X / nf_a
-    B = Y / nf_b
-    terms = _compute_moment_terms(A, B, indep_cols=indep_cols)
+def _hsic_estimates(
+    terms: dict[str, tuple[torch.Tensor, torch.Tensor]],
+    P: int,
+    Q: int | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Extract naive, Song, and dep-cols HSIC estimates from moment terms.
+
+    If Q is None or Q <= 1, the dep-cols estimate falls back to Song.
+    """
     t1, t1d = terms["ijji"]
     t2, t2d = terms["iiii"]
     t3, t3d = terms["ijjj"]
@@ -109,23 +104,76 @@ def cka_estimators_all(
     t7, t7d = terms["iijl"]
     t8, t8d = terms["ijll"]
     t9, t9d = terms["ijlm"]
+
     f1 = P / (P - 2)
     f2 = 2 / (P - 2)
     f3 = (1 / (P - 1)) * (1 / (P - 2))
-    sums_n = t1 - 2 / P * t5 + (1 / P) ** 2 * t9
-    sums = (P / (P - 3)) * (
+
+    naive = t1 - 2 / P * t5 + (1 / P) ** 2 * t9
+    song = (P / (P - 3)) * (
         t1 - f1 * t2 + f2 * (t3 + t4 - t5) + f3 * (t6 - t7 - t8 + t9)
     )
-    if indep_cols or X.shape[1] != Y.shape[1]:
-        sums_d = sums
-    else:
-        Q = Qa
-        sums_d = (
+    if Q is not None and Q > 1:
+        depcols = (
             (P / (P - 3))
             * (Q / (Q - 1))
             * (t1d - f1 * t2d + f2 * (t3d + t4d - t5d) + f3 * (t6d - t7d - t8d + t9d))
         )
-    return float(sums_n.item()), float(sums.item()), float(sums_d.item())
+    else:
+        depcols = song
+    return naive, song, depcols
+
+
+def cka_estimators_all(
+    X: torch.Tensor, Y: torch.Tensor, indep_cols: bool = True
+) -> tuple[float, float, float]:
+    """Compute all three CKA estimators: naive, debiased (Song), and dependent-cols.
+
+    CKA = HSIC(K, L) / sqrt(HSIC(K, K) * HSIC(L, L))
+
+    The cross-HSIC numerator always uses Song — columns of X and Y are
+    independently sampled, so the dep-cols correction is not needed
+    (Chun et al. 2025). The dep-cols correction applies only to the
+    self-HSICs in the denominator, where columns are inherently dependent.
+    """
+    if X.shape[0] != Y.shape[0]:
+        raise ValueError("X and Y must have the same number of samples")
+
+    P = X.shape[0]
+    Qa = X.shape[1]
+    Qb = Y.shape[1]
+
+    # Cast to float64: dep-cols correction has heavy cancellation in pval−qval
+    # that requires double precision.
+    A = X.to(dtype=torch.float64) / ((P**0.5) * (Qa**0.5))
+    B = Y.to(dtype=torch.float64) / ((P**0.5) * (Qb**0.5))
+
+    # Cross-HSIC (numerator): always Song — X and Y columns are independent.
+    terms_cross = _compute_moment_terms(A, B, indep_cols=True)
+    naive_cross, song_cross, _ = _hsic_estimates(terms_cross, P)
+
+    # Self-HSICs (denominator): dep-cols correction applies here.
+    terms_xx = _compute_moment_terms(A, A, indep_cols=indep_cols)
+    terms_yy = _compute_moment_terms(B, B, indep_cols=indep_cols)
+    naive_xx, song_xx, depcols_xx = _hsic_estimates(
+        terms_xx, P, Q=Qa if not indep_cols else None,
+    )
+    naive_yy, song_yy, depcols_yy = _hsic_estimates(
+        terms_yy, P, Q=Qb if not indep_cols else None,
+    )
+
+    def _cka(num: torch.Tensor, dxx: torch.Tensor, dyy: torch.Tensor) -> float:
+        product = dxx * dyy
+        if product <= 0:
+            return 0.0
+        denom = torch.sqrt(product) + EPS
+        return float((num / denom).item())
+
+    return (
+        _cka(naive_cross, naive_xx, naive_yy),
+        _cka(song_cross, song_xx, song_yy),
+        _cka(song_cross, depcols_xx, depcols_yy),
+    )
 
 
 def cka_naive(X: torch.Tensor, Y: torch.Tensor) -> float:

@@ -479,7 +479,6 @@ def run_v2t_experiment(
     num_permutations: int = 200,
     alpha: float = 0.05,
     q_outlier: float = 0.95,
-    force: bool = False,
     force_features: bool = False,
     num_workers: int = 1,
 ) -> Dict[str, np.ndarray]:
@@ -515,7 +514,6 @@ def run_v2t_experiment(
         num_permutations: Number of permutations for null distribution.
         alpha: Significance level.
         q_outlier: Quantile for outlier clipping.
-        force: Force recomputation even if results exist.
         force_features: Force recomputation of features.
         num_workers: Number of parallel workers.
 

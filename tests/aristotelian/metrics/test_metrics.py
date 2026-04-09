@@ -356,3 +356,45 @@ def test_sg_rsa_superuniform_under_null_all_perms():
         pvals.append(res.pvalue)
     rate = float(np.mean([p <= alpha for p in pvals]))
     assert rate <= alpha
+
+
+# =============================================================================
+# Regression tests for fixed bugs
+# =============================================================================
+
+
+def test_rv_coefficient_self_similarity_is_one():
+    """RV(X, X) must equal 1.0 (regression: denominator used trace of
+    element-wise square instead of Frobenius norm squared)."""
+    from aristotelian.metrics import MetricRegistry
+
+    torch.manual_seed(42)
+    X = torch.randn(50, 20)
+    rv = MetricRegistry.compute_raw("rv_coefficient", X, X)
+    assert np.isclose(rv, 1.0, atol=1e-5), f"RV(X, X) = {rv}, expected 1.0"
+
+
+def test_rv_coefficient_bounded():
+    """RV coefficient must be in [0, 1] for independent data."""
+    from aristotelian.metrics import MetricRegistry
+
+    torch.manual_seed(43)
+    X = torch.randn(50, 20)
+    Y = torch.randn(50, 20)
+    rv = MetricRegistry.compute_raw("rv_coefficient", X, Y)
+    assert 0.0 <= rv <= 1.0 + 1e-6, f"RV(X, Y) = {rv}, expected in [0, 1]"
+
+
+def test_rv_coefficient_null_uses_correct_denominator():
+    """RV null distribution scores must also be in [0, 1] (regression:
+    same denominator bug affected null computation)."""
+    from aristotelian.metrics import MetricConfig, MetricRegistry
+
+    torch.manual_seed(44)
+    X = torch.randn(30, 10)
+    Y = torch.randn(30, 10)
+    config = MetricConfig(calibrate=True, num_permutations=20, quantile=0.95)
+    result = MetricRegistry.compute("rv_coefficient", X, Y, config)
+    null_arr = np.asarray(result.null_samples, dtype=float)
+    assert np.all(null_arr >= -1e-6), f"Null scores below 0: {null_arr.min()}"
+    assert np.all(null_arr <= 1.0 + 1e-6), f"Null scores above 1: {null_arr.max()}"
