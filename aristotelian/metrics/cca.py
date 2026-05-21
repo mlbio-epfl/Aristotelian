@@ -136,6 +136,8 @@ class CCAMean(BaseMetric):
     def _compute_raw(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
     ) -> float:
+        # L/R factorisation; the algebraically-equivalent Cxx^{-1/2} @ Cxy @ Cyy^{-1/2}
+        # is float32-unstable when d > n.
         device = config.device
         reg = 1e-6
         Xc = (X - X.mean(0, keepdim=True)).to(device=device, dtype=torch.float32)
@@ -145,14 +147,15 @@ class CCAMean(BaseMetric):
         eye_y = torch.eye(dy, device=device, dtype=torch.float32)
         Cxx = (Xc.T @ Xc) / (n - 1) + reg * eye_x
         Cyy = (Yc.T @ Yc) / (n - 1) + reg * eye_y
-        Cxy = (Xc.T @ Yc) / (n - 1)
         Sx, Ux = torch.linalg.eigh(Cxx)
         Sy, Uy = torch.linalg.eigh(Cyy)
         Sx = torch.clamp(Sx, min=reg)
         Sy = torch.clamp(Sy, min=reg)
         Cxx_inv_sqrt = Ux @ torch.diag(1.0 / torch.sqrt(Sx)) @ Ux.T
         Cyy_inv_sqrt = Uy @ torch.diag(1.0 / torch.sqrt(Sy)) @ Uy.T
-        T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
+        L = Cxx_inv_sqrt @ Xc.T
+        R = Yc @ Cyy_inv_sqrt
+        T = (L @ R) / (n - 1)
         try:
             eigvals = torch.linalg.eigvalsh(T @ T.T)
             svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
@@ -354,6 +357,8 @@ class PWCCA(BaseMetric):
     def _compute_raw(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
     ) -> float:
+        # L/R factorisation; the algebraically-equivalent Cxx^{-1/2} @ Cxy @ Cyy^{-1/2}
+        # is float32-unstable when d > n.
         device = config.device
         reg = 1e-6
         Xc = (X - X.mean(0, keepdim=True)).to(device=device, dtype=torch.float32)
@@ -363,14 +368,15 @@ class PWCCA(BaseMetric):
         eye_y = torch.eye(dy, device=device, dtype=torch.float32)
         Cxx = (Xc.T @ Xc) / (n - 1) + reg * eye_x
         Cyy = (Yc.T @ Yc) / (n - 1) + reg * eye_y
-        Cxy = (Xc.T @ Yc) / (n - 1)
         Sx, Ux = torch.linalg.eigh(Cxx)
         Sy, Uy = torch.linalg.eigh(Cyy)
         Sx = torch.clamp(Sx, min=reg)
         Sy = torch.clamp(Sy, min=reg)
         Cxx_inv_sqrt = Ux @ torch.diag(1.0 / torch.sqrt(Sx)) @ Ux.T
         Cyy_inv_sqrt = Uy @ torch.diag(1.0 / torch.sqrt(Sy)) @ Uy.T
-        T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
+        L = Cxx_inv_sqrt @ Xc.T
+        R = Yc @ Cyy_inv_sqrt
+        T = (L @ R) / (n - 1)
         eigvals, U = torch.linalg.eigh(T @ T.T)
         # eigh ascending → reverse for SVD descending convention
         svals = torch.sqrt(torch.clamp(eigvals.flip(-1), min=0.0))
