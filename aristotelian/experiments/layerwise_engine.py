@@ -603,7 +603,8 @@ def _pwcca_cache(X: np.ndarray, reg: float) -> Dict[str, np.ndarray]:
     Cxx = (Xc.T @ Xc) / (n - 1) + reg * np.eye(Xc.shape[1])
     Ux, Sx, _ = np.linalg.svd(Cxx)
     Cxx_inv_sqrt = Ux @ np.diag(1.0 / np.sqrt(Sx)) @ Ux.T
-    return {"Xc": Xc, "XcT": Xc.T, "Cxx_inv_sqrt": Cxx_inv_sqrt}
+    L = Cxx_inv_sqrt @ Xc.T
+    return {"Xc": Xc, "XcT": Xc.T, "Cxx_inv_sqrt": Cxx_inv_sqrt, "L": L}
 
 
 def _pwcca_score_cached(
@@ -612,13 +613,14 @@ def _pwcca_score_cached(
     *,
     reg: float,
 ) -> float:
+    # L/R factorisation; Cxx^{-1/2} @ Cxy @ Cyy^{-1/2} is float-unstable when d > n.
     Yc_perm = center_np(Y_perm)
     n = Yc_perm.shape[0]
     Cyy = (Yc_perm.T @ Yc_perm) / (n - 1) + reg * np.eye(Yc_perm.shape[1])
     Uy, Sy, _ = np.linalg.svd(Cyy)
     Cyy_inv_sqrt = Uy @ np.diag(1.0 / np.sqrt(Sy)) @ Uy.T
-    Cxy = (x_cache["XcT"] @ Yc_perm) / (n - 1)
-    T = x_cache["Cxx_inv_sqrt"] @ Cxy @ Cyy_inv_sqrt
+    R = Yc_perm @ Cyy_inv_sqrt
+    T = (x_cache["L"] @ R) / (n - 1)
     U, svals, _ = np.linalg.svd(T, full_matrices=False)
     A = x_cache["Cxx_inv_sqrt"] @ U
     weights = np.sum(np.abs(A), axis=0)

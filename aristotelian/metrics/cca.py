@@ -70,13 +70,14 @@ def _cca_project_pca(
 
 def _cca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
     """Compute mean canonical correlation."""
+    # L/R factorisation; Cxx^{-1/2} @ Cxy @ Cyy^{-1/2} is float-unstable when d > n
+    # (Cxy round-off in low-precision input is amplified by Cxx^{-1/2} ≈ 1/sqrt(reg)).
     Xc = center_np(X)
     Yc = center_np(Y)
     n = Xc.shape[0]
 
     Cxx = (Xc.T @ Xc) / (n - 1) + reg * np.eye(Xc.shape[1])
     Cyy = (Yc.T @ Yc) / (n - 1) + reg * np.eye(Yc.shape[1])
-    Cxy = (Xc.T @ Yc) / (n - 1)
 
     # Whitening via eigh (faster & more stable for symmetric PD matrices)
     Sx, Ux = np.linalg.eigh(Cxx)
@@ -86,20 +87,22 @@ def _cca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
     Cxx_inv_sqrt = Ux @ np.diag(1.0 / np.sqrt(Sx)) @ Ux.T
     Cyy_inv_sqrt = Uy @ np.diag(1.0 / np.sqrt(Sy)) @ Uy.T
 
-    T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
+    L = Cxx_inv_sqrt @ Xc.T
+    R = Yc @ Cyy_inv_sqrt
+    T = (L @ R) / (n - 1)
     _, svals = _svd_via_eigh(T)
     return float(np.mean(svals))
 
 
 def _pwcca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
     """Compute projection weighted CCA."""
+    # See _cca_mean for the L/R rationale.
     Xc = center_np(X)
     Yc = center_np(Y)
     n = Xc.shape[0]
 
     Cxx = (Xc.T @ Xc) / (n - 1) + reg * np.eye(Xc.shape[1])
     Cyy = (Yc.T @ Yc) / (n - 1) + reg * np.eye(Yc.shape[1])
-    Cxy = (Xc.T @ Yc) / (n - 1)
 
     Sx, Ux = np.linalg.eigh(Cxx)
     Sy, Uy = np.linalg.eigh(Cyy)
@@ -108,7 +111,9 @@ def _pwcca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
     Cxx_inv_sqrt = Ux @ np.diag(1.0 / np.sqrt(Sx)) @ Ux.T
     Cyy_inv_sqrt = Uy @ np.diag(1.0 / np.sqrt(Sy)) @ Uy.T
 
-    T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
+    L = Cxx_inv_sqrt @ Xc.T
+    R = Yc @ Cyy_inv_sqrt
+    T = (L @ R) / (n - 1)
     U, svals = _svd_via_eigh(T)
     A = Cxx_inv_sqrt @ U
 
