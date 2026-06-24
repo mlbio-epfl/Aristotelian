@@ -8,7 +8,7 @@ from typing import Sequence
 import numpy as np
 import torch
 
-from .aggregation import gated_rescaled
+from .aggregation import gated_rescaled, tau_order_statistic
 from .utils import EPS
 
 
@@ -54,15 +54,12 @@ def compute_null_variants(
     median_null = float(np.median(null_arr))
     std_null = float(null_arr.std()) if null_arr.size > 0 else 0.0
 
-    null_centered = float(raw - median_null)
+    null_centered = float(raw - mean_null)
     z = float((raw - mean_null) / (std_null + EPS))
 
-    if raw >= mean_null:
-        denom = max_score - mean_null
-        ari = (raw - mean_null) / denom if denom > 0 else 0.0
-    else:
-        denom = mean_null - min_score
-        ari = (raw - mean_null) / denom if denom > 0 else 0.0
+    # ARI-style: (s - E[s]) / (s_max - E[s]) per the paper (one-sided)
+    denom = max_score - mean_null
+    ari = (raw - mean_null) / denom if denom > 0 else 0.0
     ari = float(max(min(ari, 1.0), -1.0))
 
     return NullVariants(
@@ -104,9 +101,8 @@ def compute_calibration_stats(
     else:
         null_arr = np.asarray(null_samples, dtype=float)
 
-    # Include observed value in distribution for tau computation
-    full_arr = np.append(null_arr, raw)
-    tau = float(np.quantile(full_arr, quantile))
+    # Exact permutation cutoff (shared helper; ceiling order statistic of null + obs).
+    tau = tau_order_statistic(null_arr, quantile, obs=raw)
 
     # Compute gated score
     gated = gated_rescaled(raw, tau_alpha=tau, s_max=max_score)

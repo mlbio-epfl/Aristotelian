@@ -6,6 +6,8 @@ from typing import Tuple
 
 import numpy as np
 
+from ..metrics.aggregation import tau_order_statistic
+
 
 def bh_fdr(pvalues: np.ndarray, *, alpha: float = 0.05) -> Tuple[float, np.ndarray]:
     """Benjamini-Hochberg FDR control. Returns (threshold, reject_mask)."""
@@ -32,5 +34,4 @@ def max_stat_threshold(null_max: np.ndarray, *, alpha: float = 0.05) -> float:
     arr = np.asarray(null_max, dtype=float)
     if arr.size == 0:
         raise ValueError("null_max must be non-empty")
-    q = 1.0 - alpha
-    return float(np.quantile(arr, q))
+    return tau_order_statistic(arr, 1.0 - alpha)

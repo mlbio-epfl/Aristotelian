@@ -33,6 +33,35 @@ def _svd_via_eigh(T: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return U[:, ::-1].copy(), svals[::-1].copy()
 
 
+def _mean_canonical_corr(T: torch.Tensor) -> torch.Tensor:
+    # symmetric mean over min(dx,dy) canonical corrs; decompose the smaller Gram
+    gram = T @ T.mT if T.shape[-2] <= T.shape[-1] else T.mT @ T
+    svals = torch.sqrt(torch.clamp(torch.linalg.eigvalsh(gram), min=0.0))
+    return svals.mean(dim=-1)
+
+
+def _pwcca_weighted_mean(
+    svals: torch.Tensor,
+    U: torch.Tensor,
+    cxx_inv_sqrt: torch.Tensor,
+    Xc: torch.Tensor,
+    r: int,
+) -> torch.Tensor:
+    # Morcos projection-weighted mean over the top-r canonical components.
+    # weight_i = sum over datapoints of |canonical variable i| = ||Xc h_i||_1;
+    # this gives rank-deficient (null-space) directions zero weight, unlike the
+    # direction-L1 ||h_i|| which Cxx^{-1/2} blows up by ~1/sqrt(reg) when d>=n.
+    # r MUST be the rank min(dx,dy,n-1): including the degenerate near-zero
+    # eigenspace makes single vs batched eigh disagree (arbitrary eigenvectors),
+    # breaking raw/null exchangeability and inflating the calibrated score for d>=n.
+    svals = svals[..., :r]
+    A = cxx_inv_sqrt @ U[..., :, :r]
+    Z = Xc @ A
+    w = Z.abs().sum(dim=-2)
+    w = w / (w.sum(dim=-1, keepdim=True) + EPS)
+    return (w * svals).sum(dim=-1)
+
+
 def _cca_project_pca(
     X: np.ndarray,
     Y: np.ndarray,
@@ -90,12 +119,14 @@ def _cca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
     L = Cxx_inv_sqrt @ Xc.T
     R = Yc @ Cyy_inv_sqrt
     T = (L @ R) / (n - 1)
-    _, svals = _svd_via_eigh(T)
+    # symmetric: mean over min(dx,dy) canonical corrs (decompose smaller Gram)
+    gram = T @ T.T if T.shape[0] <= T.shape[1] else T.T @ T
+    svals = np.sqrt(np.maximum(np.linalg.eigvalsh(gram), 0.0))
     return float(np.mean(svals))
 
 
 def _pwcca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
-    """Compute projection weighted CCA."""
+    """Compute projection weighted CCA (Morcos sample-L1, rank-truncated)."""
     # See _cca_mean for the L/R rationale.
     Xc = center_np(X)
     Yc = center_np(Y)
@@ -115,10 +146,17 @@ def _pwcca_mean(X: np.ndarray, Y: np.ndarray, reg: float = 1e-6) -> float:
     R = Yc @ Cyy_inv_sqrt
     T = (L @ R) / (n - 1)
     U, svals = _svd_via_eigh(T)
-    A = Cxx_inv_sqrt @ U
 
-    # Projection weights
-    weights = np.sum(np.abs(A), axis=0)
+    # Truncate to the canonical rank min(dx,dy,n-1), then Morcos projection
+    # weights: sample-L1 of each canonical variable Z = Xc @ (Cxx^{-1/2} @ U)
+    # over datapoints. The rank truncation drops the degenerate near-zero
+    # eigenspace that exists when d >= n.
+    r = min(Xc.shape[1], Yc.shape[1], Xc.shape[0] - 1)
+    U = U[:, :r]
+    svals = svals[:r]
+    A = Cxx_inv_sqrt @ U
+    Z = Xc @ A
+    weights = np.sum(np.abs(Z), axis=0)
     weights = weights / (np.sum(weights) + EPS)
     return float(np.sum(weights * svals))
 
@@ -162,11 +200,10 @@ class CCAMean(BaseMetric):
         R = Yc @ Cyy_inv_sqrt
         T = (L @ R) / (n - 1)
         try:
-            eigvals = torch.linalg.eigvalsh(T @ T.T)
-            svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
+            score = _mean_canonical_corr(T)
         except torch._C._LinAlgError:
-            svals = torch.linalg.svdvals(T)
-        return float(svals.mean().item())
+            score = torch.linalg.svdvals(T).mean()
+        return float(score.item())
 
     def _compute_null_distribution(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
@@ -223,13 +260,11 @@ class CCAMean(BaseMetric):
             R_perm = R[perms[start:end]]  # (B, n, dy)
             # T_batch[b] = L @ R_perm[b] / (n-1)
             T_batch = torch.einsum("xn,bny->bxy", L, R_perm) / (n - 1)
-            TTt = T_batch @ T_batch.transpose(-1, -2)  # (B, dx, dx)
             try:
-                eigvals = torch.linalg.eigvalsh(TTt)  # (B, dx)
-                svals = torch.sqrt(torch.clamp(eigvals, min=0.0))
+                scores = _mean_canonical_corr(T_batch)  # (B,)
             except torch._C._LinAlgError:
-                svals = torch.linalg.svdvals(T_batch)
-            null_scores.extend(svals.mean(dim=-1).cpu().tolist())
+                scores = torch.linalg.svdvals(T_batch).mean(dim=-1)
+            null_scores.extend(scores.cpu().tolist())
 
         return null_scores
 
@@ -386,10 +421,8 @@ class PWCCA(BaseMetric):
         # eigh ascending → reverse for SVD descending convention
         svals = torch.sqrt(torch.clamp(eigvals.flip(-1), min=0.0))
         U = U.flip(-1)
-        A = Cxx_inv_sqrt @ U
-        weights = A.abs().sum(dim=0)
-        weights = weights / (weights.sum() + 1e-8)
-        return float((weights * svals).sum().item())
+        score = _pwcca_weighted_mean(svals, U, Cxx_inv_sqrt, Xc, min(dx, dy, n - 1))
+        return float(score.item())
 
     def _compute_null_distribution(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
@@ -441,11 +474,9 @@ class PWCCA(BaseMetric):
             # eigh returns ascending order; reverse for descending (SVD convention)
             svals = torch.sqrt(torch.clamp(eigvals.flip(-1), min=0.0))
             U_batch = U_batch.flip(-1)
-            # A = Cxx_inv_sqrt @ U  →  (dx, dx) @ (B, dx, dx) broadcasts
-            A_batch = Cxx_inv_sqrt @ U_batch
-            weights = A_batch.abs().sum(dim=-2)  # (B, dx)
-            weights = weights / (weights.sum(dim=-1, keepdim=True) + EPS)
-            scores = (weights * svals).sum(dim=-1)  # (B,)
+            scores = _pwcca_weighted_mean(
+                svals, U_batch, Cxx_inv_sqrt, Xc, min(dx, dy, n - 1)
+            )
             null_scores.extend(scores.cpu().tolist())
 
         return null_scores
@@ -468,6 +499,7 @@ class RVCoefficient(BaseMetric):
     def _compute_raw(
         self, X: torch.Tensor, Y: torch.Tensor, config: MetricConfig
     ) -> float:
+        # Centered RV (== linear CKA, a known identity; documented in the appendix).
         Xc = X - X.mean(dim=0, keepdim=True)
         Yc = Y - Y.mean(dim=0, keepdim=True)
         Gx = Xc @ Xc.T

@@ -29,6 +29,7 @@ from ..metrics.aggregation import (
     compute_similarity_matrix,
     gated_rescaled,
 )
+from ..metrics.cca import _pwcca_weighted_mean
 from ..metrics.utils import (
     batched_perms,
     center_gram,
@@ -597,35 +598,20 @@ def compute_alignment_gated_svcca_cached(
     )
 
 
-def _pwcca_cache(X: np.ndarray, reg: float) -> Dict[str, np.ndarray]:
-    Xc = center_np(X)
+def _cca_whiten(
+    layer: torch.Tensor, reg: float = 1e-6
+) -> tuple[torch.Tensor, torch.Tensor, int]:
+    """Precompute whitening for one layer. Returns (Xc, C_inv_sqrt, dim)."""
+    device = layer.device
+    Xc = (layer - layer.mean(0, keepdim=True)).to(dtype=torch.float32)
+    d = Xc.shape[1]
     n = Xc.shape[0]
-    Cxx = (Xc.T @ Xc) / (n - 1) + reg * np.eye(Xc.shape[1])
-    Ux, Sx, _ = np.linalg.svd(Cxx)
-    Cxx_inv_sqrt = Ux @ np.diag(1.0 / np.sqrt(Sx)) @ Ux.T
-    L = Cxx_inv_sqrt @ Xc.T
-    return {"Xc": Xc, "XcT": Xc.T, "Cxx_inv_sqrt": Cxx_inv_sqrt, "L": L}
-
-
-def _pwcca_score_cached(
-    x_cache: Dict[str, np.ndarray],
-    Y_perm: np.ndarray,
-    *,
-    reg: float,
-) -> float:
-    # L/R factorisation; Cxx^{-1/2} @ Cxy @ Cyy^{-1/2} is float-unstable when d > n.
-    Yc_perm = center_np(Y_perm)
-    n = Yc_perm.shape[0]
-    Cyy = (Yc_perm.T @ Yc_perm) / (n - 1) + reg * np.eye(Yc_perm.shape[1])
-    Uy, Sy, _ = np.linalg.svd(Cyy)
-    Cyy_inv_sqrt = Uy @ np.diag(1.0 / np.sqrt(Sy)) @ Uy.T
-    R = Yc_perm @ Cyy_inv_sqrt
-    T = (x_cache["L"] @ R) / (n - 1)
-    U, svals, _ = np.linalg.svd(T, full_matrices=False)
-    A = x_cache["Cxx_inv_sqrt"] @ U
-    weights = np.sum(np.abs(A), axis=0)
-    weights = weights / (np.sum(weights) + 1e-8)
-    return float(np.sum(weights * svals))
+    eye = torch.eye(d, device=device, dtype=torch.float32)
+    C = (Xc.T @ Xc) / (n - 1) + reg * eye
+    S, U = torch.linalg.eigh(C)
+    S = torch.clamp(S, min=reg)
+    C_inv_sqrt = U @ torch.diag(1.0 / torch.sqrt(S)) @ U.T
+    return Xc, C_inv_sqrt, d
 
 
 def compute_alignment_gated_pwcca_cached(
@@ -637,18 +623,45 @@ def compute_alignment_gated_pwcca_cached(
     seed: int | None = None,
     reg: float = 1e-6,
 ) -> Dict[str, float | Tuple[int, int]]:
+    """PWCCA with GPU-accelerated batched null distribution.
+
+    Uses batched eigh (not eigvalsh) because PWCCA needs eigenvectors
+    for projection weighting. Whitening precomputed per layer.
+    """
     if not x_layers or not y_layers:
         raise ValueError("x_layers and y_layers must be non-empty")
     device = x_layers[0].device
     n = x_layers[0].shape[0]
+    n_x = len(x_layers)
+    n_y = len(y_layers)
 
-    x_cache = [_pwcca_cache(x.detach().cpu().numpy(), reg=reg) for x in x_layers]
-    y_cache = [y.detach().cpu().numpy() for y in y_layers]
+    # Precompute whitening per X layer (need Cxx_inv_sqrt for weighting)
+    x_cache = []
+    for x_layer in x_layers:
+        Xc, Cxx_inv_sqrt, dx = _cca_whiten(x_layer, reg)
+        L = Cxx_inv_sqrt @ Xc.T  # (dx, n)
+        x_cache.append((L, Cxx_inv_sqrt, Xc, dx))
 
-    S = torch.empty((len(x_cache), len(y_cache)), device=device)
-    for i, x_c in enumerate(x_cache):
-        for j, y in enumerate(y_cache):
-            S[i, j] = _pwcca_score_cached(x_c, y, reg=reg)
+    # Precompute whitening per Y layer
+    y_cache = []
+    for y_layer in y_layers:
+        Yc, Cyy_inv_sqrt, dy = _cca_whiten(y_layer, reg)
+        R = Yc @ Cyy_inv_sqrt  # (n, dy)
+        y_cache.append((R, dy))
+
+    # Raw similarity matrix with PWCCA scoring
+    S = torch.empty((n_x, n_y), device=device)
+    for i, (L_i, Cxx_inv_sqrt_i, Xc_i, dx_i) in enumerate(x_cache):
+        for j, (R_j, dy_j) in enumerate(y_cache):
+            T = (L_i @ R_j) / (n - 1)
+            TTt = T @ T.T
+            eigvals, U = torch.linalg.eigh(TTt)
+            # eigh ascending → reverse for SVD descending convention
+            svals = torch.sqrt(torch.clamp(eigvals.flip(-1), min=0.0))
+            U = U.flip(-1)
+            S[i, j] = _pwcca_weighted_mean(
+                svals, U, Cxx_inv_sqrt_i, Xc_i, min(dx_i, dy_j, n - 1)
+            )
 
     agg = agg_max(S, return_indices=True)
     T_obs = float(agg.value)
@@ -656,6 +669,7 @@ def compute_alignment_gated_pwcca_cached(
         (int(agg.indices["i"]), int(agg.indices["j"])) if agg.indices else (0, 0)
     )
 
+    # Generate permutations
     rng = torch.Generator(device=device)
     if seed is not None:
         rng.manual_seed(seed)
@@ -663,16 +677,43 @@ def compute_alignment_gated_pwcca_cached(
         if device.type == "cuda":
             torch.cuda.manual_seed_all(seed)
 
-    null_samples = []
-    for _ in range(num_permutations):
-        perm = torch.randperm(n, generator=rng, device=device)
-        perm_np = perm.cpu().numpy()
-        S_perm = torch.empty_like(S)
-        y_perm = [y[perm_np] for y in y_cache]
-        for i, x_c in enumerate(x_cache):
-            for j, _ in enumerate(y_cache):
-                S_perm[i, j] = _pwcca_score_cached(x_c, y_perm[j], reg=reg)
-        null_samples.append(float(agg_max(S_perm).value))
+    perms = torch.stack(
+        [
+            torch.randperm(n, generator=rng, device=device)
+            for _ in range(num_permutations)
+        ]
+    )
+
+    # Memory-aware batch size
+    max_dx = max(dx for _, _, _, dx in x_cache)
+    max_dy = max(dy for _, dy in y_cache)
+    elem = 4  # float32
+    per_perm_bytes = (n * max_dy + max_dx * max_dy + max_dx * max_dx * 2) * elem
+    max_batch_bytes = 512 * 1024 * 1024
+    chunk = max(1, max_batch_bytes // max(per_perm_bytes, 1))
+    chunk = min(num_permutations, chunk)
+
+    # Batched null distribution
+    null_samples: list[float] = []
+    for start in range(0, num_permutations, chunk):
+        end = min(start + chunk, num_permutations)
+        batch_perms = perms[start:end]
+        B = batch_perms.shape[0]
+
+        S_perm = torch.empty(B, n_x, n_y, device=device)
+        for j, (R_j, dy_j) in enumerate(y_cache):
+            R_perm = R_j[batch_perms]  # (B, n, dy)
+            for i, (L_i, Cxx_inv_sqrt_i, Xc_i, dx_i) in enumerate(x_cache):
+                T_batch = torch.einsum("xn,bny->bxy", L_i, R_perm) / (n - 1)
+                TTt = T_batch @ T_batch.transpose(-1, -2)
+                eigvals, U_batch = torch.linalg.eigh(TTt)  # (B, dx), (B, dx, dx)
+                svals = torch.sqrt(torch.clamp(eigvals.flip(-1), min=0.0))
+                U_batch = U_batch.flip(-1)
+                S_perm[:, i, j] = _pwcca_weighted_mean(
+                    svals, U_batch, Cxx_inv_sqrt_i, Xc_i, min(dx_i, dy_j, n - 1)
+                )
+
+        null_samples.extend(S_perm.view(B, -1).max(dim=1).values.tolist())
 
     return _build_gated_summary(
         null_samples, T_obs=T_obs, best_indices=best_indices, alpha=alpha

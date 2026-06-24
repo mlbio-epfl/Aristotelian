@@ -169,8 +169,10 @@ def test_sg_rsa_respects_perms_and_null_matches_manual():
     )
     assert np.isclose(res.raw, raw)
     assert np.allclose(np.asarray(res.null_samples), np.asarray(null_scores))
-    # tau is computed from null_scores + observed value
-    expected_tau = float(np.quantile(null_scores + [raw], 0.67))
+    # tau is the exact permutation cutoff (order statistic) including the observed value
+    from aristotelian.metrics.aggregation import tau_order_statistic
+
+    expected_tau = tau_order_statistic(null_scores, 0.67, obs=raw)
     assert np.isclose(res.tau, expected_tau)
     expected_p = (sum(s >= raw for s in null_scores) + 1.0) / (len(null_scores) + 1.0)
     assert np.isclose(res.pvalue, expected_p)

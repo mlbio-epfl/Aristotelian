@@ -17,6 +17,7 @@ from .. import (
     sg_rsa,
     standard_cka,
 )
+from .aggregation import tau_order_statistic
 from .calibration import compute_null_variants
 from .rsa import _spearman_corr_torch
 from .utils import sample_student_t
@@ -266,7 +267,7 @@ def run_null_type_ablation(
         for _ in range(num_permutations):
             Yp = permute(kind)
             null_scores.append(float(raw_fn(X, Yp)))
-        tau = float(np.quantile(null_scores, quantile))
+        tau = tau_order_statistic(null_scores, quantile, obs=raw)
         variants = compute_null_variants(
             raw, null_scores, min_score=min_score, max_score=max_score
         )

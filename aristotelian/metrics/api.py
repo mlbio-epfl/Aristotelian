@@ -308,11 +308,10 @@ def _multiq_compute(
     # Now compute for each quantile using the same null samples
     import numpy as np
 
-    from .aggregation import gated_rescaled
+    from .aggregation import gated_rescaled, tau_order_statistic
     from .calibration import compute_null_variants
 
     null_arr = np.asarray(result.null_samples, dtype=float)
-    full_arr = np.append(null_arr, result.raw)
     raw = result.raw
     p_value = result.pvalue
 
@@ -320,11 +319,11 @@ def _multiq_compute(
     tau = {}
     tail_strength = {}
     for q in quantiles:
-        tau_q = float(np.quantile(full_arr, q))
+        tau_q = tau_order_statistic(null_arr, q, obs=raw)
         alpha = 1.0 - float(q)
+        # tau-gate only (consistent with the single-quantile compute_calibration_stats);
+        # the tau threshold already encodes the alpha-level rejection, so no separate p-gate.
         g_val = gated_rescaled(raw, tau_alpha=tau_q, s_max=metric.max_score)
-        if p_value > alpha:
-            g_val = 0.0
         gated[q] = g_val
         tau[q] = tau_q
         if alpha <= 0:

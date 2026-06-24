@@ -507,19 +507,16 @@ class TestMultiqRegressions:
         config = MetricConfig(calibrate=True, num_permutations=50, quantile=0.95)
         result = MetricRegistry.compute("cka_linear", X, Y, config)
 
+        from aristotelian.metrics.aggregation import tau_order_statistic
+
         null_arr = np.asarray(result.null_samples, dtype=float)
-        full_arr = np.append(null_arr, result.raw)
 
         q = 0.95
-        multiq_result = sg_cka_linear_multiq(
-            X, Y, [q], num_permutations=50, device="cpu"
-        )
+        sg_cka_linear_multiq(X, Y, [q], num_permutations=50, device="cpu")
 
-        # Multiq tau should match the full_arr quantile (including raw),
-        # not just null_arr. We can't compare exactly because different
-        # permutations are used, but we test the formula is correct by
-        # checking against result.tau which uses full_arr.
-        assert result.tau == np.quantile(full_arr, q)
+        # tau is the exact permutation cutoff (ceiling order statistic) including the
+        # observed value, via the shared helper used by both single and multiq paths.
+        assert result.tau == tau_order_statistic(null_arr, q, obs=result.raw)
 
     def test_multiq_rsa_ari_uses_correct_bounds(self):
         """Multiq RSA ARI must use min_score=-1.0 (regression:
@@ -533,13 +530,10 @@ class TestMultiqRegressions:
         result = sg_rsa_multiq(X, Y, [0.95], num_permutations=50, device="cpu")
         variants = result["variants"]
 
-        # Recompute ARI with correct bounds
+        # Recompute ARI with the paper's one-sided bound: (s - E[s]) / (s_max - E[s])
         raw = result["raw"]
         mean_null = variants.mean_null
-        if raw >= mean_null:
-            denom = 1.0 - mean_null  # max_score=1.0
-        else:
-            denom = mean_null - (-1.0)  # min_score=-1.0
+        denom = 1.0 - mean_null  # max_score=1.0
 
         if denom > 0:
             expected_ari = (raw - mean_null) / denom

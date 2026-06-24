@@ -1,6 +1,7 @@
 # Revisiting the Platonic Representation Hypothesis: An Aristotelian View
 
-[![Paper](https://img.shields.io/badge/arXiv-2506.16895-b31b1b.svg)](https://arxiv.org/abs/2602.14486)
+[![ICML 2026](https://img.shields.io/badge/ICML-2026-8A2BE2.svg)](https://icml.cc/Conferences/2026)
+[![Paper](https://img.shields.io/badge/arXiv-2602.14486-b31b1b.svg)](https://arxiv.org/abs/2602.14486)
 [![Project Page](https://img.shields.io/badge/Project-Page-blue)](https://brbiclab.epfl.ch/projects/aristotelian/)
 
 **[Fabian Gröger*](https://fabiangroeger96.github.io/)** · **[Shuo Wen*](https://wenshuo128.github.io/)** · **[Maria Brbić](https://brbiclab.epfl.ch/team/)**
@@ -62,11 +63,11 @@ python -m scripts.plots.experiments --sections all
 If you find this work useful, please cite:
 
 ```bibtex
-@article{groger2026revisiting,
-  title   = {Revisiting the Platonic Representation Hypothesis: An Aristotelian View},
-  author  = {Gr{\"o}ger, Fabian and Wen, Shuo and Brbi{\'c}, Maria},
-  journal = {arXiv preprint},
-  year    = {2026},
+@inproceedings{groger2026revisiting,
+  title     = {Revisiting the Platonic Representation Hypothesis: An Aristotelian View},
+  author    = {Gr{\"o}ger, Fabian and Wen, Shuo and Brbi{\'c}, Maria},
+  booktitle = {Proceedings of the 43rd International Conference on Machine Learning (ICML)},
+  year      = {2026},
 }
 ```
 

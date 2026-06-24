@@ -154,6 +154,31 @@ def permutation_null_aggregated(
     return null_samples
 
 
+def tau_order_statistic(
+    null_samples: "Sequence[float] | np.ndarray",
+    quantile: float,
+    *,
+    obs: float | None = None,
+) -> float:
+    """Exact permutation threshold: the ceiling order statistic at ``quantile``.
+
+    ``tau = s_(ceil(quantile * m))`` of the sorted sample (the null, with the observed
+    value appended when ``obs`` is given, as in a permutation test). This is the cutoff
+    that controls Type-I at <= ``1 - quantile``. ``np.quantile`` interpolates and sits
+    below this, under-controlling Type-I at small K, so every gating threshold routes
+    through this single helper for a consistent definition across all metrics/paths.
+    """
+    arr = np.asarray(null_samples, dtype=float)
+    if obs is not None:
+        arr = np.append(arr, float(obs))
+    arr = np.sort(arr)
+    m = arr.size
+    if m == 0:
+        raise ValueError("null_samples must be non-empty")
+    rank = min(max(int(np.ceil(float(quantile) * m)), 1), m)
+    return float(arr[rank - 1])
+
+
 def compute_null_summary(
     null_samples_T: Sequence[float],
     *,
@@ -163,9 +188,8 @@ def compute_null_summary(
     if not 0.0 <= float(alpha) <= 1.0:
         raise ValueError("alpha must be in [0, 1]")
     null_arr = np.asarray(null_samples_T, dtype=float)
-    # Include observed value in the permutation distribution for tau
-    full_arr = np.append(null_arr, T_obs)
-    tau_alpha = float(np.quantile(full_arr, 1.0 - alpha))
+    # Exact permutation cutoff (ceiling order statistic of null + observed).
+    tau_alpha = tau_order_statistic(null_arr, 1.0 - alpha, obs=T_obs)
     p_value = (1.0 + float(np.sum(null_arr >= float(T_obs)))) / (len(null_arr) + 1.0)
     if alpha <= 0:
         tail_strength = 0.0
@@ -192,7 +216,7 @@ def gated_rescaled(T_obs: float, *, tau_alpha: float, s_max: float | None) -> fl
     denom = s_max - tau_alpha
     if abs(denom) <= EPS:
         return 1.0
-    return float((T_obs - tau_alpha) / denom)
+    return float(min((T_obs - tau_alpha) / denom, 1.0))
 
 
 def bootstrap_statistic(
