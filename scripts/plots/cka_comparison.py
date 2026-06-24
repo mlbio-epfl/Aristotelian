@@ -574,140 +574,6 @@ def plot_dim_padding_deltas(results: dict, output_path: Path) -> None:
 
 
 # =============================================================================
-# Agreement Summary Plot (2-panel)
-# =============================================================================
-
-
-def plot_agreement_summary(
-    high_dn: dict | None,
-    dim_padding: dict | None,
-    output_path: Path,
-) -> None:
-    """Create 2-panel figure showing calibrated CKA agreement with analytical methods.
-
-    Panel A: Under signal (dim_padding) - differences from debiased and dep-cols
-    Panel B: Under null (high_dn) - differences from debiased and dep-cols
-
-    Key message: Calibrated CKA recovers debiased (diff ≈ 0) but not dep-cols,
-    because they correct for different confounds.
-    """
-    if high_dn is None or dim_padding is None:
-        print("Need both high_dn and dim_padding results for agreement summary")
-        return
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.75, 2.5))
-
-    # Colors for the difference lines
-    color_debiased = COLORS["debiased"]
-    color_depcols = COLORS["depcols"]
-
-    # --- Panel A: Under Signal (dim_padding, highest SNR) ---
-    style_line_axes(ax1)
-    d_list = np.array(dim_padding["d_list"])
-    n_signal = dim_padding["n"]
-    ratio_signal = d_list / n_signal  # Convert to d/n
-    snr_list = dim_padding["snr_list"]
-    snr_high_idx = len(snr_list) - 1  # Use highest SNR
-
-    gated_signal = dim_padding["gated"][snr_high_idx, :]
-    debiased_signal = dim_padding["debiased"][snr_high_idx, :]
-    depcols_signal = dim_padding["depcols"][snr_high_idx, :]
-
-    diff_debiased_signal = gated_signal - debiased_signal
-    diff_depcols_signal = gated_signal - depcols_signal
-
-    ax1.plot(
-        ratio_signal,
-        diff_debiased_signal,
-        "o-",
-        color=color_debiased,
-        label="Calibrated $-$ Debiased",
-        linewidth=1.5,
-        markersize=4,
-    )
-    ax1.plot(
-        ratio_signal,
-        diff_depcols_signal,
-        "s-",
-        color=color_depcols,
-        label="Calibrated $-$ Dep-cols",
-        linewidth=1.5,
-        markersize=4,
-    )
-
-    ax1.axhline(0, color="#888888", linestyle="--", linewidth=1, alpha=0.7)
-    ax1.set_xlabel(r"$d/n$")
-    ax1.set_ylabel("Difference under signal")
-    ax1.set_xscale("log", base=2)
-    prh_legend(ax1, style="square", fontsize=7)
-
-    # Set y-limits for signal panel
-    max_abs_signal = float(
-        np.max(np.abs(np.concatenate([diff_debiased_signal, diff_depcols_signal])))
-    )
-    ylim_signal = max(0.05, max_abs_signal * 1.15)
-    ax1.set_ylim(-ylim_signal, ylim_signal)
-
-    # --- Panel B: Under Null (high_dn) ---
-    style_line_axes(ax2)
-    ratio_null = np.array(high_dn["ratio_list"])
-    gated_null = np.array(high_dn["gated_mean"])
-    debiased_null = np.array(high_dn["debiased_mean"])
-    depcols_null = np.array(high_dn["depcols_mean"])
-
-    # Limit to same x-range as signal panel (d/n <= 8)
-    max_ratio = min(ratio_signal.max(), 8.0)
-    mask = ratio_null <= max_ratio
-    ratio_null = ratio_null[mask]
-    gated_null = gated_null[mask]
-    debiased_null = debiased_null[mask]
-    depcols_null = depcols_null[mask]
-
-    diff_debiased_null = gated_null - debiased_null
-    diff_depcols_null = gated_null - depcols_null
-
-    ax2.plot(
-        ratio_null,
-        diff_debiased_null,
-        "o-",
-        color=color_debiased,
-        label="Calibrated $-$ Debiased",
-        linewidth=1.5,
-        markersize=4,
-    )
-    ax2.plot(
-        ratio_null,
-        diff_depcols_null,
-        "s-",
-        color=color_depcols,
-        label="Calibrated $-$ Dep-cols",
-        linewidth=1.5,
-        markersize=4,
-    )
-
-    ax2.axhline(0, color="#888888", linestyle="--", linewidth=1, alpha=0.7)
-    ax2.set_xlabel(r"$d/n$")
-    ax2.set_ylabel("Difference under null")
-    ax2.set_xscale("log", base=2)
-    prh_legend(ax2, style="square", fontsize=7)
-
-    # Set y-limits for null panel (zoomed in)
-    max_abs_null = float(
-        np.max(np.abs(np.concatenate([diff_debiased_null, diff_depcols_null])))
-    )
-    ylim_null = max(0.005, max_abs_null * 1.15)
-    ax2.set_ylim(-ylim_null, ylim_null)
-
-    # Match x-axis limits across panels
-    xlim = (ratio_signal.min() * 0.8, ratio_signal.max() * 1.2)
-    ax1.set_xlim(xlim)
-    ax2.set_xlim(xlim)
-
-    _save_fig(output_path)
-    print(f"Saved: {output_path}")
-
-
-# =============================================================================
 # Combined Summary Plot
 # =============================================================================
 
@@ -909,11 +775,11 @@ def main():
     if any([null_drift, high_dn, dim_padding]):
         plot_summary(null_drift, high_dn, dim_padding, output_dir / "summary.pdf")
 
-    # Agreement summary (2-panel figure for narrative)
-    if high_dn is not None and dim_padding is not None:
-        plot_agreement_summary(
-            high_dn, dim_padding, output_dir / "agreement_summary.pdf"
-        )
+    # NOTE: Fig. 12 (agreement_summary.pdf, the calibration-vs-analytical-debiasing
+    # comparison) is now generated by scripts/analyses/cka_debiasing_comparison.py,
+    # which uses the corrected Song-denominator debiased-CKA estimator
+    # (aristotelian.metrics.estimators.cka_debiased). The earlier plot_agreement_summary
+    # path (which reused high_dn/dim_padding data) is retired and no longer run.
 
     print(f"\nAll plots saved to {output_dir}")
 
