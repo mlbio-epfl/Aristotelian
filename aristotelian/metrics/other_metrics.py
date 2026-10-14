@@ -116,6 +116,36 @@ def _procrustes_from_centered(Xc: torch.Tensor, Yc: torch.Tensor) -> float:
     return float((1.0 - residual / (norm_Yc + EPS)).item())
 
 
+def _cknna_centered_bounded(K: torch.Tensor, L: torch.Tensor, k: int) -> torch.Tensor:
+    """Centre-first CKNNA that is bounded above by 1.
+
+    Order follows Huh et al. (2024), Appendix A, Eq. 16: double-centre the Gram
+    matrices first, then keep only the mutual k-nearest neighbours. Neighbours
+    are taken from the raw Gram (self excluded); the values summed are the
+    centred Grams. The numerator sums over a subset of each model's own
+    neighbours, so Cauchy-Schwarz bounds the ratio by 1.
+
+    This differs from the default CKNNA path, which masks the raw Gram first and
+    centres afterwards inside HSIC. With anisotropic features (high mean cosine)
+    that default can exceed 1 at large k. See the CKNNA class docstring.
+    """
+    n = K.shape[0]
+    H = torch.eye(n, dtype=K.dtype, device=K.device) - 1.0 / n
+    Kc = H @ K @ H
+    Lc = H @ L @ H
+
+    def knn_mask(G: torch.Tensor) -> torch.Tensor:
+        G = G.clone().fill_diagonal_(float("-inf"))
+        _, idx = torch.topk(G, k, dim=1)
+        return torch.zeros(n, n, dtype=K.dtype, device=K.device).scatter_(1, idx, 1.0)
+
+    mask_K = knn_mask(K)
+    mask_L = knn_mask(L)
+    num = (mask_K * mask_L * Kc * Lc).sum()
+    den = torch.sqrt((mask_K * Kc**2).sum() * (mask_L * Lc**2).sum())
+    return num / (den + EPS)
+
+
 @register_metric
 class CKNNA(BaseMetric):
     """Centered Kernel Neighborhood Nearest Neighbor Alignment.
@@ -123,7 +153,32 @@ class CKNNA(BaseMetric):
     HSIC-based alignment restricted to k-nearest neighbors.
     Can be distance-aware or distance-agnostic.
 
-    Score range: [0, 1] where 1 means perfect neighborhood alignment.
+    Two variants, chosen by ``config.cknna_bounded``:
+
+    - ``cknna_bounded=False`` (default). Reproduces the platonic-rep
+      implementation (Huh et al. 2024): mask the raw Gram matrix to the mutual
+      k-nearest neighbours, then centre inside HSIC. This is the metric the
+      paper uses and the one comparable to platonic-rep and work built on it.
+      With anisotropic features (mean cosine well above 0) it is NOT bounded by
+      1 at large k: the numerator uses the shared neighbour mask while the two
+      denominators use each model's own mask, so Cauchy-Schwarz does not bound
+      the ratio, and the score can climb above 1 for k beyond about n/2. It
+      stays well inside [0, 1] at the small k the paper reports (k up to 100
+      with n=1024). See issue #2.
+
+    - ``cknna_bounded=True``. Centre first, then keep the mutual neighbours
+      (Huh et al. 2024, Appendix A, Eq. 16). Bounded above by 1 at every k by
+      Cauchy-Schwarz. Like CKA it can sit marginally below 0 for near-orthogonal
+      data. It agrees with the default at small k and ranks model pairs almost
+      identically, so it is a drop-in for analyses that go to larger k or need
+      the 1 upper bound. See ``_cknna_centered_bounded``.
+
+    The distance-agnostic path (neighbour overlap count) is already in [0, 1]
+    for both variants, so ``cknna_bounded`` only changes the distance-aware
+    (HSIC) path.
+
+    Score range: bounded above by 1 with ``cknna_bounded=True`` (and near 0 at
+    the low end, as for CKA); with the default, within 1 only at small k.
     """
 
     name = "cknna"
@@ -158,6 +213,11 @@ class CKNNA(BaseMetric):
         else:
             L = Y @ Y.T
             cache["gram_Y"] = L
+
+        # Bounded variant: centre first, then mask (see class docstring). Only
+        # the distance-aware path can exceed 1, so the flag only changes it.
+        if config.cknna_bounded and not distance_agnostic:
+            return float(_cknna_centered_bounded(K, L, k).item())
 
         def similarity(
             Km: torch.Tensor, Lm: torch.Tensor, topk_inner: int
@@ -230,10 +290,18 @@ class CKNNA(BaseMetric):
             hsic_fn = hsic_unbiased if unbiased else hsic_biased
             return hsic_fn(mask * Km, mask * Lm)
 
+        bounded = config.cknna_bounded and not distance_agnostic
+        if bounded:
+            null_scores: list[float] = []
+            for perm in perms:
+                L_perm = L[perm][:, perm]
+                null_scores.append(float(_cknna_centered_bounded(K, L_perm, k).item()))
+            return null_scores
+
         # sim_kk is invariant (K doesn't change)
         sim_kk = _similarity(K, K, k)
 
-        null_scores: list[float] = []
+        null_scores = []
         for perm in perms:
             L_perm = L[perm][:, perm]
             sim_kl = _similarity(K, L_perm, k)

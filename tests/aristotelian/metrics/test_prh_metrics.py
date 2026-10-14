@@ -188,6 +188,57 @@ class TestCKNNA:
         original = OriginalMetrics.cknna(feats_A, feats_B, topk=topk, unbiased=False)
         assert np.isclose(ours, original, rtol=1e-5)
 
+    def test_default_matches_original_at_large_k(self):
+        # The default stays bit-identical to platonic-rep even in the regime
+        # where it exceeds 1 (issue #2): we reproduce their metric faithfully.
+        torch.manual_seed(0)
+        n, d = 256, 64
+        off = 4.0 * torch.ones(d)
+        feats_A = torch.randn(n, d) + off
+        feats_B = torch.randn(n, d) + off
+        for topk in (10, 100, 200, 250):
+            ours = cknna(feats_A, feats_B, topk=topk)
+            original = OriginalMetrics.cknna(feats_A, feats_B, topk=topk)
+            assert np.isclose(ours, original, rtol=1e-5), f"mismatch at k={topk}"
+
+    def test_default_can_exceed_one_with_anisotropic_features(self):
+        # Documents the known behaviour the bounded variant fixes.
+        torch.manual_seed(0)
+        n, d = 256, 64
+        off = 4.0 * torch.ones(d)
+        feats_A = torch.randn(n, d) + off
+        feats_B = torch.randn(n, d) + off
+        assert cknna(feats_A, feats_B, topk=200) > 1.0
+
+    def test_bounded_never_exceeds_one(self):
+        # The fix guarantees the upper bound of 1 at every k. Like CKA, it can
+        # sit marginally below 0 for near-orthogonal data, so only cap above.
+        torch.manual_seed(0)
+        n, d = 256, 64
+        off = 4.0 * torch.ones(d)
+        feats_A = torch.randn(n, d) + off
+        feats_B = torch.randn(n, d) + off
+        for topk in (10, 50, 100, 200, 250):
+            score = cknna(feats_A, feats_B, topk=topk, bounded=True)
+            assert score <= 1.0 + 1e-6, f"exceeds 1 at k={topk}: {score}"
+
+    def test_bounded_agrees_with_default_at_small_k(self):
+        # At the small k the paper uses (k << n), on normalized features as the
+        # PRH pipeline produces, the two variants track each other closely.
+        torch.manual_seed(0)
+        n, d = 512, 128
+        shared = torch.randn(n, d)
+        feats_A = torch.nn.functional.normalize(
+            0.5 * shared + 0.5 * torch.randn(n, d), dim=-1
+        )
+        feats_B = torch.nn.functional.normalize(
+            0.5 * shared + 0.5 * torch.randn(n, d), dim=-1
+        )
+        for topk in (10, 20):
+            default = cknna(feats_A, feats_B, topk=topk)
+            bounded = cknna(feats_A, feats_B, topk=topk, bounded=True)
+            assert np.isclose(default, bounded, atol=0.03), f"k={topk}"
+
 
 class TestConsistencyWithMainMetrics:
     def test_mutual_knn_matches_sg_knn_raw(self, normalized_features):

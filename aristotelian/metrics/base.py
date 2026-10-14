@@ -43,6 +43,12 @@ class MetricConfig:
     # Distance-agnostic flag (for CKNNA)
     distance_agnostic: bool = False
 
+    # CKNNA neighbour/centre order.
+    # False (default) reproduces platonic-rep: mask the raw Gram, then centre
+    # inside HSIC. True uses the centre-first variant that stays in [0, 1].
+    # See CKNNA for the full explanation.
+    cknna_bounded: bool = False
+
     # Null calibration settings
     num_permutations: int = 200
     quantile: float = 0.95
