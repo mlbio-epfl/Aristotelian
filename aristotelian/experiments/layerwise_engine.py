@@ -441,6 +441,10 @@ def compute_alignment_gated_cknna_cached(
     seed: int | None = None,
     unbiased: bool = True,
 ) -> Dict[str, float | Tuple[int, int]]:
+    # This fast, cached path implements the platonic-rep CKNNA only (mask the
+    # raw Gram, then centre inside HSIC). The bounded [0, 1] variant lives in
+    # the CKNNA metric (config.cknna_bounded); it is a different estimator that
+    # cannot reuse the cached HSIC terms, so it is not available here.
     if not x_grams or not y_grams:
         raise ValueError("x_grams and y_grams must be non-empty")
     device = x_grams[0].device

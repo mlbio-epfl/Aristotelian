@@ -231,10 +231,19 @@ def cknna(
     topk: int | None = None,
     distance_agnostic: bool = False,
     unbiased: bool = True,
+    bounded: bool = False,
 ) -> float:
-    """Centered Kernel Neighborhood Nearest Neighbor Alignment (CKNNA)."""
+    """Centered Kernel Neighborhood Nearest Neighbor Alignment (CKNNA).
+
+    ``bounded=False`` (default) reproduces platonic-rep (mask then centre).
+    ``bounded=True`` centres first, then masks, and stays in [0, 1] at every k.
+    See the CKNNA metric class for the full explanation.
+    """
     config = MetricConfig(
-        topk=topk, distance_agnostic=distance_agnostic, unbiased=unbiased
+        topk=topk,
+        distance_agnostic=distance_agnostic,
+        unbiased=unbiased,
+        cknna_bounded=bounded,
     )
     return MetricRegistry.compute_raw("cknna", feats_A, feats_B, config)
 
